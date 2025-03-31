@@ -105,7 +105,6 @@ class Operator:
         pd.set_option('display.max_rows', 100)
         pd.set_option('display.max_columns', 10)
 
-        #print(self.df[['Load [W]', 'P_Res [W]', 'PV_Production']].head(100))
 
         env = self.env
         print(f"DEBUG: Dispatch gestartet")
@@ -283,11 +282,10 @@ class Operator:
             for es in env.storage:
                 power = self.df.at[clock, 'P_Res [W]']
                 discharge_power = es.discharge(clock=clock, power=power)
-                print (f"Debbug: disccharge Power {discharge_power}")
                 self.df.at[clock, f'{es.name} [W]'] += discharge_power
                 #self.df.at[clock, 'P_Res [W]'] += discharge_power
                 p_res += discharge_power
-
+        # Wenn nach Speicherentladung noch Restlast besteht, FuelCell nutzen
         if p_res > 0:
             for fc in env.fuel_cell:
                 for hstr in env.H2Storage:
@@ -305,7 +303,8 @@ class Operator:
 
         # Sicherheitsprüfung gegen negative Werte
         if self.df.at[clock, 'P_Res [W]'] < 0:
-            print(f"⚠️ Warnung: P_Res < 0 an {clock}, wird auf 0 gesetzt.")
+            self.df.at[clock, 'P_Res [W]'] = 0
+
 
     def feed_in(self,
                 component: PV or WindTurbine):

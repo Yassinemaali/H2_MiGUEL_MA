@@ -177,8 +177,6 @@ class Storage:
             discharge power
         :return: power
         """
-        print(f"DEBUG: discharge() aufgerufen für {self.name} um {clock} mit Power={power}")
-        print(" storage vor entladen", self.df.at[clock, 'Q [Wh]'])
         t_step = self.env.i_step
 
         if clock == self.env.t_start:

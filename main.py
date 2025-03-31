@@ -94,10 +94,12 @@ def demonstration(grid_connection=False):
                                 c=30000,
                                 soc=0.25)
         # **Wasserstoffkomponenten hinzufügen**
-        environment.add_electrolyser(p_n=135000, c_invest_n=900, c_op_main_n=30) # elektrolyseur 
+        # elektrolyseur mit p_n Leistung [W]
+        environment.add_electrolyser(p_n=135000, c_invest_n=900, c_op_main_n=30)
+        # Wasserstoffspeicher, Kapazität [kg]
         environment.add_H2_Storage(capacity=150, initial_level=0, name="H2_Storage")
+        # Brennstoffzelle, maximale Leistung [W]
         environment.add_fuel_cell(max_power=35000, efficiency=0.6)
-
 
     return environment
 

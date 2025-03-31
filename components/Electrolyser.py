@@ -71,7 +71,6 @@ class Electrolyser:
                power[W]
         :return: clock power
         """
-        print(f"DEBUG: run() aufgerufen für clock={clock}, power={round(power,2)}")
         if power <= self.p_n:
             power = power
         else:
@@ -80,9 +79,7 @@ class Electrolyser:
         p_relative = round(((power/self.p_n) * 100),2)
 
         self.df_electrolyser.at[clock, 'P[%]'] = p_relative
-        #print(self.df_electrolyser.tail(5))  # Letzte 5 Zeilen anzeigen
 
-        print(f"DEBUG: um {clock} ist die P_relativ {p_relative} %")
         if p_relative >= self.p_min:                                                # Bedingung minimale Leisteung
             h2_production = self. calc_H2_production(clock, power=power)
 
@@ -104,7 +101,7 @@ class Electrolyser:
         load efficiency curve form CSV  file
 
         """
-        data = pd.read_csv(r'C:\Users\yessi\OneDrive\Documents\MasterEE\Masterarbeit\Code\Miguel_H2_PV\miguel-master - Kopie\data\elektrolyseur_data .csv', sep=';', decimal='.')
+        data = pd.read_csv(r'C:\Users\yessi\OneDrive\Documents\MasterEE\Masterarbeit\Code\Miguel_H2_PV\miguel-master_V4\H2_MiGUEL_MA\data\elektrolyseur_data .csv', sep=';', decimal='.')
 
         return data
 
@@ -115,24 +112,17 @@ class Electrolyser:
         :return:
         """
 
-        print(f"DEBUG: P_relativ für Interpolation: {self.df_electrolyser.at[clock, 'P[%]']}")
-        print(self.df_electrolyser.head(10))
         spez_verbrauch = self.spez_elec_cons_interpolator(self.df_electrolyser.at[clock, 'P[%]'])  # W/kg  # [kWh/Nm3]
-        print(f"DEBBUG: der spezifische Verbrauch liegt um {clock} bei {spez_verbrauch} [kWh/Nm3]")
+
         power = round((power/1000) * (self.env.i_step / 60),2) # W
-        h2_production = round((power/spez_verbrauch)/11.89, 2)if spez_verbrauch > 0 else 0                   # kg   1KG = 11,126 Nm3
-        print(f"DEBBUG: H2 Produktion in calc H2 Methode um {clock} ist {h2_production} kg ")
-
-
+        h2_production = round((power/spez_verbrauch)/11.89, 2)if spez_verbrauch > 0 else 0
 
         if h2_production > 0:
-           self.df_electrolyser.at[clock, 'H2_Production [kg]'] = h2_production
-           #print(f"DEBBUG: H2 production um {clock} wird gespeichert in Dataframe {self.df_electrolyser.at[clock, 'H2_Production [kg]']}")
+            self.df_electrolyser.at[clock, 'H2_Production [kg]'] = h2_production
         else:
             self.df_electrolyser.at[clock, 'H2_Production [kg]'] = 0
 
         return h2_production
-
 
     def calc_lcoh (self):
         """
@@ -147,10 +137,9 @@ class Electrolyser:
 
         lcoh = (self.c_invest + self.c_op_main)/annual_h2_production
 
-        #self.df_electrolyser.at[clock, 'LCOH [$/kg]'] = lcoh
-
         return lcoh
 
+    '''
 
 
     def plot_electrolyser_power(self):
@@ -162,37 +151,9 @@ class Electrolyser:
         plt.legend()
         plt.grid()
         plt.show()
+    '''
 
 
-
-    # Funktion zum Plotten des Diagramms
-    def plot_dual_axis(dates, power, h2, season):
-        fig, ax1 = plt.subplots(figsize=(10, 5))
-        # Beispielhafte simulierte Daten
-        # Ersetze diese Daten mit deinen echten Werten
-        dates = pd.date_range(start="2024-06-01", periods=24, freq="H")  # Sommer: 1 Tag stündlich
-        power_summer = [5000 + i * 100 for i in range(24)]  # Eingangsleistung steigt
-        h2_summer = [p / 5000 for p in power_summer]  # Wasserstoffproduktion skaliert
-
-        dates_winter = pd.date_range(start="2024-12-01", periods=24, freq="H")  # Winter: 1 Tag stündlich
-        power_winter = [3000 + i * 50 for i in range(24)]  # Geringere Eingangsleistung
-        h2_winter = [p / 5000 for p in power_winter]  # Geringere H₂-Produktion
-
-        # Linke Achse (Eingangsleistung)
-        ax1.set_xlabel("Zeit")
-        ax1.set_ylabel("Eingangsleistung (W)", color="tab:blue")
-        ax1.plot(dates, power, label="Eingangsleistung", color="tab:blue")
-        ax1.tick_params(axis="y", labelcolor="tab:blue")
-
-        # Rechte Achse (H₂-Produktion)
-        ax2 = ax1.twinx()
-        ax2.set_ylabel("Wasserstoffproduktion (kg)", color="tab:green")
-        ax2.plot(dates, h2, label="H₂-Produktion", color="tab:green", linestyle="dashed")
-        ax2.tick_params(axis="y", labelcolor="tab:green")
-
-        plt.title(f"Simulation für {season}")
-        fig.tight_layout()
-        plt.show()
 
 
 

@@ -65,7 +65,6 @@ class H2Storage:
         :param clock: Current timestamp.
         :param inflow: Amount of hydrogen added to the storage (kg).
         """
-        print(f"DEBUG: Wasserstoffspeicher wird geladen mit {inflow} kg um {clock}")
 
         if inflow < 0:
             inflow = 0 # Kein Ladevorgang, falls kein Inflow vorhanden
@@ -81,7 +80,7 @@ class H2Storage:
 
         self.current_level = new_level
 
-        soc = self.current_level / self.capacity
+        soc = (self.current_level / self.capacity)*100
         charge = 33.33 * inflow * 1000 * 0.25   #[W]
 
         # Logging ins DataFrame
@@ -102,8 +101,6 @@ class H2Storage:
         :param clock: Current timestamp.
         :param outflow: Amount of hydrogen withdrawn from the storage (kg).
         """
-        print(f"DEBUG: Wasserstoffspeicher wird entladen mit {outflow} kg um {clock}")
-
         if outflow <= 0:
             return   # Kein Entladevorgang, falls kein Outflow vorhanden
 
@@ -115,7 +112,7 @@ class H2Storage:
 
         self.current_level = new_level
 
-        soc = self.current_level / self.capacity
+        soc = (self.current_level / self.capacity)*100
         discharge = 33.33 * outflow * 1000 * 0.25
 
         # Logging ins DataFrame
@@ -124,57 +121,6 @@ class H2Storage:
         self.hstorage_df.at[clock, 'Storage Level [kg]'] = new_level
         self.hstorage_df.at[clock, 'SOC [%]'] = soc
         self.hstorage_df.at[clock, 'Q[Wh]'] -= discharge
-
-
-        return
-    '''
-
-    def update(self, clock: dt.datetime, inflow: float, outflow: float):
-        """
-        Update the storage state for a given simulation step.
-
-        :param inflow: Amount of hydrogen added to the storage (kg).
-        :param outflow: Amount of hydrogen withdrawn from the storage (kg).
-        :param current_time: The timestamp or time index for this update.
-        """
-        print(f"Die Methode Update wird aufgerufen")
-
-        if clock == self.env.t_start:
-            self.storage_df['Storage Level [kg]'] = self.capacity * self.soc_min
-
-        # Calculate the net inflow to the storage
-        net_inflow = inflow - outflow
-
-        # Update the current level, ensuring it stays within capacity
-        new_level = self.current_level + net_inflow
-        print (f"current level H2 Storage beträgt ")
-
-        if new_level > self.capacity:
-            inflow = self.capacity - self.current_level  # Adjust inflow to prevent overflow
-            new_level = self.capacity
-        elif new_level < 0:
-            outflow = self.current_level  # Adjust outflow to prevent underflow
-            new_level = 0
-
-        # Update the storage level
-        self.current_level = new_level
-
-        # Log data for the current step
-
-        self.storage_df['H2 Inflow [kg]'] = inflow
-        self.storage_df['H2 Outflow [kg]'] = outflow
-        self.storage_df['Storage Level [kg]'] = self.current_level
-
-        return inflow, outflow
-    '''
-
-
-    def get_storage_level(self, clock):
-        """
-        Retrieve the current storage level.
-
-        :return: Current storage level in kg.
-        """
 
 
         return

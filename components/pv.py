@@ -54,7 +54,6 @@ class PV:
         self.name = name
         self.df = pd.DataFrame(columns=['P [W]'],
                                index=self.env.time)
-        print("id df pv", id (self.df))
         # Location
         self.longitude = self.env.longitude
         self.latitude = self.env.latitude
