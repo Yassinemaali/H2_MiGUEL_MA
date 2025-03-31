@@ -1,0 +1,12 @@
+;Annual energy supply [kWh/a];Lifetime energy supply [kWh];Lifetime cost [US$];Investment cost [US$];Annual cost [US$/a];LCOE [US$/kWh];Lifetime CO2 emissions [t];Initial CO2 emissions [t];Annual CO2 emissions [t/a]
+PV_1;2960,0;45358,0;0,0;14880,0;;;;;
+PV_2;9819,0;150464,0;0,0;14880,0;;;;;
+ES_1;0,0;0,0;0,0;62787,0;;;;;
+ES_1_charge;-9819,0;-150464,0;;;;;;;
+ES_1_discharge;0,0;0,0;;;;;;;
+Electrolyser_1;;0,0;;;;;;;
+Electrolyser_1_charge;0,0;0,0;;;;;;;
+Electrolyser_1_discharge;;0,0;;;;;;;
+FuelCell_2;;0,0;;;;;;;
+FuelCell_2_discharge;-0,0;0,0;;;;;;;
+System;150000,0;2298569,0;0,0;92547,0;0,0;0,04;0,0;0,0;0,0

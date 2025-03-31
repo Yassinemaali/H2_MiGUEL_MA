@@ -1,0 +1,2 @@
+The overall system LCOE is 0.13 US$/kWh. The energy costs incurred in the period under consideration amount to 297,350 US$. In comparison, the energy costs from a complete supply from diesel generators amount to 299,714 US$. 2,364 US$ are saved over the system lifetime with the simulated system configuration.
+
