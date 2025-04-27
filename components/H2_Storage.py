@@ -15,7 +15,19 @@ class H2Storage:
     3) Wenn die Update Methode mit Outflow aufgerufen wird, wird der Speicher entgeladen und der Speicher Niveau aktualisiert
     """
 
-    def __init__(self, env, capacity: float, initial_level: float = 0, name: str = None, energy: float = None):
+    def __init__(self,
+                 env,
+                 co2_init: float = 48,      # 48 kg/ kg H2
+                 capacity: float= None ,     #[kg]
+                 initial_level: float = None,  #[%]
+                 name: str = None,
+                 c_invest : float = None,  # [USD]
+                 c_invest_n: float = 534.94,   #[Euro/kg oder kwh]
+                 c_op_main: float = None,  # [USD/a]
+                 c_op_main_n: float = 0,    #[USD/kg]
+                 c_var_n: float = 0,
+                 lifetime:int = 25
+                 ):
         """
         Initialize the hydrogen storage.
 
@@ -27,8 +39,32 @@ class H2Storage:
         self.soc_max = 0.95
         self.name = name
         self.capacity = capacity  # Maximum storage capacity in kg
-        self.energy = energy
-        self.current_level = initial_level  # Current storage level in kg
+        self.current_level = initial_level*capacity  # Current storage level in kg
+        self.lifetime= lifetime
+
+        # Emissionsdaten
+        self.co2_init = co2_init * self.capacity  # kg CO₂
+
+
+        # Kosten
+        # Investement cost [USD]
+        self.invest_cost =c_invest
+        if c_invest is None:
+           self.c_invest = c_invest_n * self.capacity
+        else:
+            self.c_invest = c_invest
+        #Operation Cost
+        self.c_op_main = c_op_main     # USD /a
+        self.c_op_main_n = c_op_main_n   #USD /KG ODER kw
+
+        if c_op_main is None:
+            self.c_op_main = self.c_op_main_n * self.capacity
+        else:
+            self.c_op_main = c_op_main
+
+        #variable COST
+        self.c_var_n = c_var_n
+        self.c_var = self.c_var_n * self.capacity
 
         # If initial_level is not given, start at 50% capacity
         self.current_level = initial_level if initial_level is not None else 0.25 * self.capacity
@@ -65,6 +101,7 @@ class H2Storage:
         :param clock: Current timestamp.
         :param inflow: Amount of hydrogen added to the storage (kg).
         """
+        time_step = self.env.i_step / 60
 
         if inflow < 0:
             inflow = 0 # Kein Ladevorgang, falls kein Inflow vorhanden
@@ -81,7 +118,7 @@ class H2Storage:
         self.current_level = new_level
 
         soc = (self.current_level / self.capacity)*100
-        charge = 33.33 * inflow * 1000 * 0.25   #[W]
+        charge = 33.33 * inflow * 1000 * time_step   #[W]
 
         # Logging ins DataFrame
         self.hstorage_df.at[clock, 'H2 Inflow [kg]'] = inflow
@@ -101,6 +138,7 @@ class H2Storage:
         :param clock: Current timestamp.
         :param outflow: Amount of hydrogen withdrawn from the storage (kg).
         """
+        time_step = self.env.i_step / 60
         if outflow <= 0:
             return   # Kein Entladevorgang, falls kein Outflow vorhanden
 
@@ -113,7 +151,7 @@ class H2Storage:
         self.current_level = new_level
 
         soc = (self.current_level / self.capacity)*100
-        discharge = 33.33 * outflow * 1000 * 0.25
+        discharge = 33.33 * outflow * 1000 * time_step
 
         # Logging ins DataFrame
         self.hstorage_df.at[clock, 'H2 Inflow [kg]'] = 0

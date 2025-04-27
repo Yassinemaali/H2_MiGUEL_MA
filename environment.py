@@ -310,7 +310,7 @@ class Environment:
                                hour=23,
                                minute=59)
         wt_hourly_data.index = pd.date_range(start=start_time,
-                                             end=end_time,
+                                            periods=len(wt_hourly_data),
                                              freq='1h')
         wt_data = wt_hourly_data
         # Interpolate values
@@ -395,8 +395,10 @@ class Environment:
                               name=name,
                               pv_profile=pv_profile,
                               c_invest=c_invest,
+                              p_n=p_n,
                               c_op_main=c_op_main,
                               c_var_n=c_var_n))
+
         elif p_n is not None:
             self.pv.append(PV(env=self,
                               name=name,
@@ -415,9 +417,13 @@ class Environment:
         else:
             pass
         self.re_supply.append(self.pv[-1])
+        pv_series = self.pv[-1].df["P [W]"].reindex(self.df.index, fill_value=0)
+        self.df[f"{name}: P [W]"] = pv_series
+        self.df["PV total power [W]"] += pv_series
+
         self.supply_components.append(self.pv[-1])
-        self.df[f'{name}: P [W]'] = self.pv[-1].df['P [W]']
-        self.df['PV total power [W]'] += self.df[f'{name}: P [W]']
+        #self.df[f'{name}: P [W]'] = self.pv[-1].df['P [W]']
+        #self.df['PV total power [W]'] += self.df[f'{name}: P [W]']
         self.add_component_data(component=self.pv[-1],
                                 supply=True)
 
@@ -480,9 +486,6 @@ class Environment:
         self.df[f'{name}: P [W]'] = self.storage[-1].df['P [W]']
         self.add_component_data(component=self.storage[-1],
                                 supply=False)
-
-        for es in self.storage:
-            print(f"DEBUG: {es.name} – Kapazität: {es.c} Wh, Max. Leistung: {es.p_n} W, SOC: {es.soc}")
 
     def add_component_data(self,
                            component,
@@ -551,7 +554,7 @@ class Environment:
                          c_invest: float = None,
                          c_op_main_n: float= None,
                          c_op_main: float= None,
-                         lifetime: float = 20):
+                         lifetime: float = None):
         """
          Add an Electrolyser to the environment.
 
@@ -571,7 +574,7 @@ class Environment:
 
 
         """
-        name = f'Electrolyser_{len(self.h2_components) + 1}'
+        name = f'Electrolyser_{len(self.electrolyser) + 1}'
         electrolyser = Electrolyser(self,
                                     name=name,
                                     p_n=p_n,
@@ -587,47 +590,51 @@ class Environment:
 
     def add_H2_Storage(self,
                        capacity: float,
-                       initial_level: float = None, name= None):
+                       initial_level: float = None,
+                       name= None,
+                       c_invest_n: float = None,
+                       c_invest: float = None,
+                       c_op_main_n: float = None,
+                       c_op_main: float = None,
+                       lifetime: float = 20
+                       ):
         """
 
-        :param capacity:
+        :param capacity: float
         :param initial_level:
         :param name:
+        :param c_invest_n:
+        :param c_invest:
+        :param c_op_main_n:
+        :param c_op_main:
+        :param lifetime:
         :return:
         """
         if name is None:
-         name = f'H2Storage_{len(self.h2_components) + 1}'
+         name = f'H2_Storage_{len(self.H2Storage) + 1}'
 
         # **Erstelle das H2Storage-Objekt mit den richtigen Variablen**
         self.H2Storage.append(H2Storage(env=self,
-            capacity=capacity,  # ✅ Variable `capacity_H2` an `capacity` übergeben
-            initial_level=initial_level,
-            name=name))
-        # **H2-Speicher zur Umgebung hinzufügen**
-        #self.H2Storage.append(h2_storage)
-        #self.h2_components.append(h2_storag)
-        '''
+                                        capacity=capacity,  # ✅ Variable `capacity_H2` an `capacity` übergeben
+                                        initial_level=initial_level,
+                                        name=name,
+                                        c_invest_n=c_invest_n,
+                                        c_invest=c_invest,
+                                        c_op_main_n=c_op_main_n,
+                                        c_op_main=c_op_main,
+                                        lifetime=lifetime
+                                        ))
 
-        # **Falls `H2 [kg]` nicht existiert, initialisieren**
-        if f'{name}: H2 [kg]' not in self.df.columns:
-            self.df[f'{name}: H2 [kg]'] = 0
-
-        # **Falls `storage_data` existiert, Daten übernehmen**
-        if not H2Storage.storage_df.empty:
-            self.df[f'{name}: H2 [kg]'] = H2Storage.storage_df['Storage Level [kg]']
-        else:
-            print(f"Warnung: `storage_data` für {name} ist leer oder nicht vorhanden.")
-
-        # **Speicher als nicht-elektrische Speicherung hinzufügen**
-        self.add_component_data(component=H2Storage, supply=False)
-        '''
 
     def add_fuel_cell(self,
                      max_power: float = None,
-                     efficiency: float= 0.95,
+                     efficiency: float= 0.6,
+                      c_invest_n: float = None,
+                      c_invest: float = None,
+                      c_op_main_n: float = None,
+                      c_op_main: float = None,
+                      lifetime: float = 20
                      ) :
-
-
         """
 
         :param max_power:
@@ -636,10 +643,16 @@ class Environment:
         :param c_op_main:
         :return:
         """
-        name = f'FuelCell_{len(self.h2_components) + 1}'
+        name = f'FuelCell_{len(self.fuel_cell) + 1}'
         fuel_cell = FuelCell(env=self,
                              max_power=max_power,
-                             efficiency=efficiency)
+                             efficiency=efficiency,
+                             c_invest_n=c_invest_n,
+                             c_invest=c_invest,
+                             c_op_main_n=c_op_main_n,
+                             c_op_main=c_op_main
+                             )
+
         self.fuel_cell.append(fuel_cell)
 
         self.h2_components.append(fuel_cell)

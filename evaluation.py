@@ -42,13 +42,15 @@ class Evaluation:
         self.H2_energy_supply = {}
         self.grid_energy_supply = {}
         self.storage_energy_supply = {}
-        #Berechnung der Speicherenergie (inkl. H2)
-        self.calc_storage_energy_supply()
 
-        for component in self.env.supply_components:
+        for component in self.env.re_supply:
             self.calc_component_energy_supply(component=component)
             self.calc_co2_emissions(component=component)
             self.calc_cost(component=component)
+        self.calc_pv_system_flows()
+        # Berechnung der Speicherenergie (inkl. H2)
+        self.calc_storage_energy_supply()
+        self.calc_H2_energy_supply()
         #Bewertung der Speicher (Batterie & H2-System)
         for es in self.env.storage:
             self.calc_co2_emissions(component=es)
@@ -62,12 +64,36 @@ class Evaluation:
         for hstr in self.env.H2Storage:
             self.calc_co2_emissions(component=hstr)
             self.calc_cost(component=hstr)
+
         self.calc_lifetime_energy_supply()
         self.calc_system_values()
         self.calc_lcoe()
         self.evaluation_df.to_csv(sys.path[1] + '/export/system_evaluation.csv',
                                   sep=self.env.csv_sep,
                                   decimal=self.env.csv_decimal)
+
+    def run(self, export: bool = True):
+        """
+        Gibt die zentralen Auswertungsergebnisse (Energie, Kosten, CO2) aus
+        und speichert sie optional als Excel-Datei.
+        """
+        print("✅ Evaluation abgeschlossen.")
+
+        print("\n📊 Energieflüsse:")
+        print(self.evaluation_df[['Annual energy supply [kWh/a]', 'Lifetime energy supply [kWh]']])
+
+        print("\n💰 Kosten:")
+        print(self.evaluation_df[
+                  ['Investment cost [US$]', 'Annual cost [US$/a]', 'Lifetime cost [US$]', 'LCOE [US$/kWh]']])
+
+        print("\n🌍 CO₂-Emissionen:")
+        print(self.evaluation_df[
+                  ['Initial CO2 emissions [t]', 'Annual CO2 emissions [t/a]', 'Lifetime CO2 emissions [t]']])
+
+        if export:
+            path = sys.path[1] + "/export/evaluation_summary_output.xlsx"
+            self.evaluation_df.to_excel(path)
+            print(f"\n💾 Ergebnisse gespeichert unter: {path}")
 
     def build_evaluation_df(self):
         """
@@ -79,8 +105,16 @@ class Evaluation:
                f'LCOE [{self.env.currency}/kWh]', 'Lifetime CO2 emissions [t]', 'Initial CO2 emissions [t]',
                'Annual CO2 emissions [t/a]']
         evaluation_df = pd.DataFrame(columns=col)
+        evaluation_df.loc['PV_to_storage'] = np.nan
+        evaluation_df.loc['PV_to_electrolyser'] = np.nan
+        evaluation_df.loc['PV_Total'] = np.nan
+
         for supply_comp in self.env.supply_components:
             evaluation_df.loc[supply_comp.name] = np.nan
+        for wt in self.env.wind_turbine:
+            evaluation_df.loc[f'{wt.name}_to_storage'] = np.nan
+            evaluation_df.loc[f'{wt.name}_from_PV_to_electrolyser [W]'] = np.nan
+
         for es in self.env.storage:
                 evaluation_df.loc[es.name] = np.nan
                 evaluation_df.loc[es.name + '_charge'] = np.nan
@@ -88,13 +122,11 @@ class Evaluation:
 
         for el in self.env.electrolyser:
             evaluation_df.loc[el.name] = np.nan
-            evaluation_df.loc[el.name + '_Power'] = np.nan
-        for hstr  in self.env.H2Storage:
-            evaluation_df.loc[hstr.name] = np.nan
-            evaluation_df.loc[hstr.name + '_Power'] = np.nan
+        #for hstr  in self.env.H2Storage:
+            #evaluation_df.loc[hstr.name] = np.nan
+
         for fc in self.env.fuel_cell:
             evaluation_df.loc[fc.name] = np.nan
-            evaluation_df.loc[fc.name + '_Power'] = np.nan
 
         evaluation_df.loc['System'] = np.nan
 
@@ -127,8 +159,14 @@ class Evaluation:
         Calculate lifetime energy supply
         :return:
         """
+        #Wie viel Energie liefert (oder verbraucht) eine Komponente über die gesamte Projektlaufzeit (z. B. 20 Jahre)?
+        print("\n📊 Starte Lebenszeit-Energieberechnung...")
         for row in self.evaluation_df.index:
             annual_energy_supply = self.evaluation_df.loc[row, 'Annual energy supply [kWh/a]']
+            if pd.isna(annual_energy_supply):
+                print(f"⚠️ {row} hat annual_energy_supply = NaN → wird übersprungen")
+                continue
+            print(f"➤ {row}: annual = {annual_energy_supply}")
             self.evaluation_df.loc[row, 'Lifetime energy supply [kWh]'] \
                 = int(self.calc_lifetime_value(initial_value=0,
                                                annual_value=annual_energy_supply))
@@ -144,38 +182,50 @@ class Evaluation:
         return peak_load
 
     def calc_component_energy_supply(self,
-                                     component: PV or WindTurbine or Grid):
+                                     component: PV or WindTurbine or Grid
+                                     ):
         """
         Calculate annual energy supply of energy supply components
         :param component:
         :return: None
         """
-        col = f'{component.name} [W]'
-        energy_supply = self.op.df[col].sum() * self.env.i_step / 60 / 1000
-        if isinstance(component, PV):
-            if len(self.env.storage) == 0 and len (self.env.h2_components) == 0:
-                charge = 0
-            else:
-                charge = self.op.df[f'{component.name}_charge [W]'].sum() * self.env.i_step / 60 / 1000
+        self.n_Modul = len(self.env.pv)
+        energy_total =self.calc_pv_system_flows()
+        energy_Modul= energy_total/self.n_Modul
 
-            self.pv_energy_supply[component.name] = energy_supply + charge
+        self.evaluation_df.loc[component.name, 'Annual energy supply [kWh/a]'] = int(energy_Modul)
 
-        elif isinstance(component, WindTurbine):
-            if len(self.env.storage) == 0 and len(self.env.h2_components) == 0:
-               charge = 0
-            else:
-                 charge = self.op.df[f'{component.name}_charge [W]'].sum() * self.env.i_step / 60 / 1000
-                 if charge == 0:
-                    charge= self.op.df.get('FuelCell_Discharge [W]', pd.Series(0)).sum() * self.env.i_step / 60 / 1000
 
-            self.wt_energy_supply[component.name] = energy_supply + charge
+    def calc_pv_system_flows(self):
+        """
+        Berechnet die Energieverteilung der PV-Produktion:
+        PV → Load, Storage, Elektrolyseur, Total
+        """
+        i_step = self.env.i_step
 
-        elif isinstance(component, Grid):
-            charge = 0
-            self.grid_energy_supply[component.name] = energy_supply
+        # Direktverbrauch (Lastabdeckung)
+        load = self.op.df['Load [W]']
+        pv_prod = self.op.df['PV_Production [W]']
+        pv_to_load = np.minimum(load, pv_prod).sum() *(i_step / 60)/ 1000
+        self.evaluation_df.loc['PV_to_load', 'Annual energy supply [kWh/a]'] = int(pv_to_load)
 
-            return
-        self.evaluation_df.loc[component.name, 'Annual energy supply [kWh/a]'] = int(energy_supply + charge)
+        # Speicher
+        pv_to_storage = 0
+        if 'PV_to_storage [W]' in self.op.df.columns:
+            pv_to_storage = self.op.df['PV_to_storage [W]'].sum() * i_step / 60 / 1000
+            self.evaluation_df.loc['PV_to_storage', 'Annual energy supply [kWh/a]'] = int(pv_to_storage)
+
+        # Elektrolyseur
+        pv_to_el = 0
+        if 'from_PV_to_electrolyser [W]' in self.op.df.columns:
+            pv_to_el = self.op.df['from_PV_to_electrolyser [W]'].sum() * i_step / 60 / 1000
+            self.evaluation_df.loc['PV_to_electrolyser', 'Annual energy supply [kWh/a]'] = int(pv_to_el)
+
+        # Gesamt
+        pv_total = pv_to_load + pv_to_storage + pv_to_el
+        self.evaluation_df.loc['PV_Total', 'Annual energy supply [kWh/a]'] = int(pv_total)
+
+        return pv_total
 
     def calc_storage_energy_supply(self):
         """
@@ -183,28 +233,55 @@ class Evaluation:
         :return: None
         """
         for es in self.env.storage:
-            col = es.name + ' [W]'
-            es_charge = int(sum(np.where(self.op.df[col] > 0,
-                                         self.op.df[col],
-                                         0).tolist()) * self.env.i_step / 60 / 1000)
-            es_discharge = int(sum(np.where(self.op.df[col] < 0,
-                                            self.op.df[col],
-                                            0).tolist()) * self.env.i_step / 60 / 1000)
-            self.evaluation_df.loc[es.name, 'Annual energy supply [kWh/a]'] = -es_discharge
-            self.storage_energy_supply[f'{es.name}_charge'] = es_charge
-            self.storage_energy_supply[f'{es.name}_discharge'] = es_discharge
-            self.evaluation_df.loc[f'{es.name}_discharge', 'Annual energy supply [kWh/a]'] = -es_discharge
-            self.evaluation_df.loc[f'{es.name}_charge', 'Annual energy supply [kWh/a]'] = -es_charge
+            col = f'{es.name} [W]'
+
+            # Lade- und Entladeleistung extrahieren
+            charge_vals = self.op.df[col].where(self.op.df[col] > 0, 0)
+            discharge_vals = self.op.df[col].where(self.op.df[col] < 0, 0)
+
+            # kWh berechnen
+            es_charge_kWh = int(charge_vals.sum() * self.env.i_step / 60 / 1000)
+            es_discharge_kWh = int(discharge_vals.sum() * self.env.i_step / 60 / 1000)
+
+            # Ergebnisse intern speichern
+            self.storage_energy_supply[f'{es.name}_charge'] = es_charge_kWh
+            self.storage_energy_supply[f'{es.name}_discharge'] = es_discharge_kWh
+
+            # Evaluationstabelle befüllen
+            self.evaluation_df.loc[f'{es.name}_charge', 'Annual energy supply [kWh/a]'] = es_charge_kWh
+            self.evaluation_df.loc[f'{es.name}_discharge', 'Annual energy supply [kWh/a]'] = -es_discharge_kWh
+            self.evaluation_df.loc[
+                es.name, 'Annual energy supply [kWh/a]'] = -es_discharge_kWh  # optional: nur Output zählt
 
     def calc_H2_energy_supply(self):
-
         for fc in self.env.fuel_cell:
             col = fc.name + ' [W]'
+            print(f"🔍 Suche nach Spalte für FuelCell: {col}")
+            if col not in self.op.df.columns:
+                print(f"❌ Spalte '{col}' fehlt in Operator-DataFrame!")
+            else:
+                print(f"✅ Spalte '{col}' vorhanden mit Einträgen:")
+                print(self.op.df[col].describe())
             fc_power = int(sum(np.where(self.op.df[col] > 0,
-                                         self.op.df[col],
-                                         0).tolist()) * self.env.i_step / 60 / 1000)
-            self.H2_energy_supply[f'{fc.name}_charge'] = fc_power
-            self.evaluation_df.loc[f'{fc.name}_charge', 'Annual energy supply [kWh/a]'] = -fc_power
+                                        self.op.df[col],
+                                        0).tolist()) * self.env.i_step / 60 / 1000)
+            self.H2_energy_supply[f'{fc.name}'] = fc_power
+            self.evaluation_df.loc[fc.name, 'Annual energy supply [kWh/a]'] = fc_power
+        total_power_kWh = 0
+
+        for el in self.env.electrolyser:
+            col = f"{el.name} [W]"
+            if col in self.op.df.columns:
+                power_sum = self.op.df[col].sum() * self.env.i_step / 60 / 1000  # kWh
+                self.evaluation_df.loc[el.name, 'Annual energy supply [kWh/a]'] = power_sum
+                total_power_kWh += power_sum
+                print(f"⚡ {el.name} Energieinput: {power_sum:.2f} kWh")
+            else:
+                print(f"⚠️ Spalte {col} fehlt in Operator-DataFrame.")
+
+
+    #================================================= CO2_Calculation ===================================================#
+    #==================================================================================================================#
 
 
     def calc_co2_emissions(self, component):
@@ -220,6 +297,7 @@ class Evaluation:
         # Lifetime CO2 emissions
         co2_lifetime = self.calc_lifetime_value(initial_value=co2_init,
                                                 annual_value=co2_annual)
+
         self.evaluation_df.loc[component.name, 'Lifetime CO2 emissions [t]'] = round(co2_lifetime, 3)
 
     def calc_co2_initial(self, component):
@@ -229,7 +307,7 @@ class Evaluation:
         :return: None
         """
         if isinstance(component, Storage):
-            co2_init = (component.co2_init + component.replacement_co2) / 1000
+            co2_init = (component.co2_init+ component.replacement_co2)/1000
         elif isinstance(component, Grid):
             co2_init = 0
         else:
@@ -247,9 +325,7 @@ class Evaluation:
         :param component: object
         :return: float
         """
-        #if isinstance(component,Electrolyser):
-            #co2_annual = self.evaluation_df.loc[
-                             #component.name, 'Annual energy supply [kWh/a]'] * self.env.co2_diesel / 1000
+
         if isinstance(component, Grid):
             co2_annual = self.evaluation_df.loc[
                              component.name, 'Annual energy supply [kWh/a]'] * self.env.co2_grid / 1000
@@ -259,6 +335,8 @@ class Evaluation:
 
         return co2_annual
 
+ # =============================================== Kosten_Calculation ==================================================#
+ # ====================================================================================================================#
 
     def calc_cost(self, component: object):
         """
@@ -286,8 +364,9 @@ class Evaluation:
         """
         if isinstance(component, Grid):
             investment_cost = 0
-        elif isinstance(component, Storage):
+        elif isinstance(component, Storage, FuelCell ):
             investment_cost = component.c_invest + component.replacement_cost
+
         else:
             investment_cost = component.c_invest
 
@@ -304,6 +383,51 @@ class Evaluation:
         :return: float
             annual_cost
         """
+
+        # Werte extrahieren
+        if isinstance(component, H2Storage):
+            annual_output = 0
+        else:
+            annual_output = self.evaluation_df.loc[component.name, 'Annual energy supply [kWh/a]']
+        co2 = self.evaluation_df.loc[component.name, 'Annual CO2 emissions [t/a]']
+
+        if pd.isna(annual_output) or pd.isna(co2):
+            return np.nan
+
+        co2_cost = co2 * self.env.avg_co2_price
+
+        # Sicherstellen, dass Kostenparameter vorhanden sind
+        required_attrs = ['c_op_main', 'c_var_n']
+        for attr in required_attrs:
+            if not hasattr(component, attr):
+                return np.nan
+
+        additional_variable_cost = annual_output * component.c_var_n
+
+        # Jährliche Kosten berechnen
+        if isinstance(component, (Storage, Electrolyser, FuelCell, H2Storage)):
+            annual_cost = component.c_op_main + co2_cost + additional_variable_cost
+
+        elif isinstance(component, Grid):
+            electricity_cost = annual_output * self.env.electricity_price
+            annual_cost = electricity_cost + co2_cost + additional_variable_cost
+
+        else:  # PV, Wind
+            annual_revenues = 0
+            if self.env.grid_connection and self.env.feed_in:
+                try:
+                    annual_revenues = self.op.df[f'{component.name} Feed in [US$]'].sum()
+                except KeyError:
+                    print(f"⚠️ Feed-in-Daten für {component.name} fehlen.")
+            annual_cost = component.c_op_main + co2_cost - annual_revenues + additional_variable_cost
+
+
+        # Speichern
+        self.evaluation_df.loc[component.name, 'Annual cost [US$/a]'] = round(annual_cost, 2)
+
+        return annual_cost
+
+        '''
         annual_output = self.evaluation_df.loc[component.name, 'Annual energy supply [kWh/a]']
         co2 = self.evaluation_df.loc[component.name, 'Annual CO2 emissions [t/a]']
         co2_cost = co2 * self.env.avg_co2_price
@@ -320,14 +444,11 @@ class Evaluation:
             additional_variable_cost = annual_output * component.c_var_n
             annual_cost = component.c_op_main + co2_cost + additional_variable_cost
         elif isinstance(component, FuelCell):
-            h2_consumed = self.op.df.get(f'{component.name}: H2 Consumption [kg]', pd.Series(0)).sum()
-            h2_cost = h2_consumed * self.env.h2_price
-            annual_cost = h2_cost + component.c_op_main + co2_cost
-
+            additional_variable_cost = annual_output * component.c_var_n
+            annual_cost =  component.c_op_main + co2_cost + additional_variable_cost
         elif isinstance (component, H2Storage):
             additional_variable_cost = annual_output * component.c_var_n
             annual_cost = component.c_op_main + co2_cost + additional_variable_cost
-
         else:
             if self.env.grid_connection:
                 if self.env.feed_in:
@@ -342,6 +463,7 @@ class Evaluation:
         self.evaluation_df.loc[component.name, f'Annual cost [US$/a]'] = int(annual_cost)
 
         return annual_cost
+        '''
     def calc_system_values(self):
         columns = [f'Lifetime cost [US$]',
                    f'Investment cost [US$]', f'Annual cost [US$/a]',
@@ -368,12 +490,25 @@ class Evaluation:
                            lifetime=self.env.lifetime)
             df.loc[row, f'LCOE [US$/kWh]'] = round(lcoe, 2)
 
+ # =====================================================Tool========================================================#
+# ==================================================================================================================#
+
     def calc_lifetime_value(self,
                             initial_value: float,
                             annual_value: float):
         """
+           Berechnet den Barwert (diskontierten Gesamtwert) über die gesamte Lebensdauer des Systems.
+
+    Diese Methode dient zur Bewertung von über die Zeit verteilten Größen wie Investitionskosten,
+    jährlichen Betriebskosten, jährlicher Energieproduktion oder Emissionen.
+    Sie berücksichtigt dabei den vom Benutzer definierten Abzinsungsfaktor (d_rate) (Diskontsatz) und
+    die Projektlaufzeit.
+
+    Der Initialwert wird nur im ersten Jahr berücksichtigt und nicht diskontiert.
+    Die jährlichen Werte werden für jedes Folgejahr einzeln diskontiert und aufsummiert.
         Calculate lifetime CO2 emissions
         :param initial_value: float
+          Einmaliger Anfangswert im Jahr 0 (z.B. Investitionskosten oder Initialemissionen)
         :param annual_value: float
         :return: float
         """

@@ -10,10 +10,12 @@ class Electrolyser:
                  env= None,
                  name: str= None,
                  p_n: float = None,
-                 c_invest_n: float=None,
-                 c_invest: float=None,
-                 c_op_main_n: float=None,
+                 c_invest_n: float=1854.6,  # Euro/kw
+                 c_invest: float= None,
+                 c_op_main_n: float=18.55,  #Euro/kw
                  c_op_main: float = None,
+                 co2_init: float = 36.95, # kg co2/kW für einen PEM Electrolyser
+                 c_var_n: float = 0,
                  life_time: float = None):
 
         self.env = env
@@ -33,10 +35,9 @@ class Electrolyser:
                                                      self.efficiency_data["Spez.Energieverbrauch [kWh/Nm3]"],
                                                      kind='linear',
                                                      fill_value="extrapolate")
-
-
         # Economic parameters
         self.c_invest_n = c_invest_n    #USD/kw
+        self.c_var_n = c_var_n          #USD/kW
         if c_invest is None:
            self.c_invest = c_invest_n * self.p_n / 1000
         else:
@@ -45,11 +46,16 @@ class Electrolyser:
             self.c_op_main_n = c_op_main_n
         else:
             self.c_op_main_n = self.c_invest_n * 0.03  # USD/kW
+        #Operation Cost
+        self.c_op_main_n= c_op_main_n
         if c_op_main is None:
             self. c_op_main = self.c_op_main_n * self.p_n / 1000
         else:
             self.c_op_main = c_op_main
+        #Co2 Cost
+        self.co2_init = co2_init * self.p_n/1000   # kg
 
+        self.life_time=life_time
 
         # Technical data
         self.technical_data = { 'component': 'Elektrolyseur',
@@ -80,7 +86,7 @@ class Electrolyser:
 
         self.df_electrolyser.at[clock, 'P[%]'] = p_relative
 
-        if p_relative >= self.p_min:                                                # Bedingung minimale Leisteung
+        if p_relative >= self.p_min:      # Bedingung minimale Leisteung
             h2_production = self. calc_H2_production(clock, power=power)
 
             #set values
@@ -101,7 +107,8 @@ class Electrolyser:
         load efficiency curve form CSV  file
 
         """
-        data = pd.read_csv(r'C:\Users\yessi\OneDrive\Documents\MasterEE\Masterarbeit\Code\Miguel_H2_PV\miguel-master_V4\H2_MiGUEL_MA\data\elektrolyseur_data .csv', sep=';', decimal='.')
+        data = pd.read_csv(r'C:\Users\yessi\OneDrive\Documents\MasterEE\Masterarbeit\Code\Miguel_H2_PV\miguel-master_V4\H2_MiGUEL_MA\data\elektrolyseur_data .csv',
+                           sep=';', decimal='.')
 
         return data
 
@@ -112,9 +119,9 @@ class Electrolyser:
         :return:
         """
 
-        spez_verbrauch = self.spez_elec_cons_interpolator(self.df_electrolyser.at[clock, 'P[%]'])  # W/kg  # [kWh/Nm3]
+        spez_verbrauch = self.spez_elec_cons_interpolator(self.df_electrolyser.at[clock, 'P[%]'])   # [kWh/Nm3]
 
-        power = round((power/1000) * (self.env.i_step / 60),2) # W
+        power = round((power/1000) * (self.env.i_step / 60),2)                                  # kWh
         h2_production = round((power/spez_verbrauch)/11.89, 2)if spez_verbrauch > 0 else 0
 
         if h2_production > 0:
@@ -124,34 +131,9 @@ class Electrolyser:
 
         return h2_production
 
-    def calc_lcoh (self):
-        """
-        calculate LCOH
-        :return:
-
-        """
-        annual_h2_production = self.df_electrolyser['H2_Production [kg]'].sum()
-
-        if annual_h2_production <= 0:
-            return float ('inf')
-
-        lcoh = (self.c_invest + self.c_op_main)/annual_h2_production
-
-        return lcoh
-
-    '''
 
 
-    def plot_electrolyser_power(self):
-        plt.figure(figsize=(12, 6))
-        plt.plot(self.df_electrolyser.index, self.df_electrolyser["P[W]"], label="Elektrolyser Power [W]", linewidth=1)
-        plt.xlabel("Zeit")
-        plt.ylabel("Leistung [W]")
-        plt.title("Elektrolyseur Eingangsleistung über die Zeit")
-        plt.legend()
-        plt.grid()
-        plt.show()
-    '''
+
 
 
 

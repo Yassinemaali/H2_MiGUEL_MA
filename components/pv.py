@@ -19,8 +19,8 @@ class PV:
                  p_n: float = None,
                  pv_profile: pd.Series = None,
                  pv_data: dict = None,
-                 c_invest_n: float = 496,
-                 c_op_main_n: float = 7.55,
+                 c_invest_n: float = 667.68,
+                 c_op_main_n: float = 6.06,
                  c_var_n: float = 0,
                  co2_init: float = 460,
                  c_invest: float = None,
@@ -70,8 +70,20 @@ class PV:
 
         if pv_profile is not None:
             # Create DataFrame from existing pv profile
-            self.df['P [W]'] = pv_profile
+            print("DEBUG: pv_profile empfangen in PV-Klasse")
+            print("  → Länge:", len(pv_profile))
+            print("  → Nullwerte:", pv_profile.isna().sum())
+            print("  → Max:", pv_profile.max())
+
+            self.df = pd.DataFrame({'P [W]': pv_profile})
+
+            #self.df['P [W]'] = pv_profile
             self.p_n = p_n
+            ####
+            print("DEBUG AFTER SETTING P [W] in self.df")
+            print("  → Summe:", self.df['P [W]'].sum())
+            print("  → Max:", self.df['P [W]'].max())
+            print("DEBUG: PV p_n =", self.p_n)
         elif p_n is not None:
             self.p_n = p_n
             self.longitude = self.env.longitude

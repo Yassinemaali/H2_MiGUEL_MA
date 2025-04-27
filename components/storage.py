@@ -22,8 +22,8 @@ class Storage:
                  n_charge: float = 0.8,
                  n_discharge: float = 0.8,
                  lifetime: int = 10,
-                 c_invest_n: float = 1200,
-                 c_op_main_n: float = 30,
+                 c_invest_n: float =550,
+                 c_op_main_n: float = 10,
                  c_var_n: float = 0,
                  co2_init: float = 103,
                  c_invest: float = None,
@@ -122,9 +122,6 @@ class Storage:
         :return: None
         """
 
-        #print(f"Beddug: Methode charge um {clock} wird aufgerufen ")
-        #print(" storage bevor laden", self.df.at[clock, 'Q [Wh]'])
-
         t_step = self.env.i_step
         if clock == self.env.t_start:
             return 0
@@ -143,8 +140,8 @@ class Storage:
             return power
         else:
             # Calculate remaining energy to charge storage
-            q_remain = (self.c * self.soc_max) - self.df.at[clock - dt.timedelta(minutes=t_step), 'Q [Wh]']
-            power = (60 * q_remain) / (t_step * self.n_charge)
+            self.q_remain = (self.c * self.soc_max) - self.df.at[clock - dt.timedelta(minutes=t_step), 'Q [Wh]']
+            power = (60 * self.q_remain) / (t_step * self.n_charge)
             if power == 0:
                 self.df.at[clock, 'P [W]'] = 0
                 self.df.at[clock, 'Q [Wh]'] = self.df.at[clock - dt.timedelta(minutes=t_step), 'Q [Wh]']
@@ -154,13 +151,12 @@ class Storage:
             else:
                 self.df.at[clock, 'P [W]'] = power
                 self.df.at[clock, 'Q [Wh]'] = self.df.at[
-                                                  clock - dt.timedelta(minutes=self.env.i_step), 'Q [Wh]'] + q_remain
+                                                  clock - dt.timedelta(minutes=self.env.i_step), 'Q [Wh]'] +\
+                                              self.q_remain
                 self.df.at[clock, 'SOC'] = self.df.at[clock, 'Q [Wh]'] / self.c
 
 
-
                 return power
-
 
     def constant_values(self, clock):
         if clock != self.env.t_start:
@@ -224,7 +220,7 @@ class Storage:
         interval = self.env.lifetime / replacements
         for year in range(int(interval), int(replacements*interval)-1, int(interval)):
             c_invest_replacement[year] = (self.c_invest_n * self.c/1000) / ((1 + self.env.d_rate) ** year)
-            co2_replacement[year] = (self.co2_init * self.c / 1000) / ((1 + self.env.d_rate) ** year)
+            co2_replacement[year] = (self.co2_init  ) / ((1 + self.env.d_rate) ** year)
 
         return c_invest_replacement, co2_replacement
 

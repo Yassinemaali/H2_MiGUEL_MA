@@ -102,10 +102,6 @@ class Operator:
             2) Charge storage from RE
         :return: None
         """
-        pd.set_option('display.max_rows', 100)
-        pd.set_option('display.max_columns', 10)
-
-
         env = self.env
         print(f"DEBUG: Dispatch gestartet")
         processed_times = set()
@@ -114,25 +110,27 @@ class Operator:
         for clock in self.df.index:
             # Priority 1: RE self supply
             for component in env.re_supply:
+
                 self.re_self_supply(clock=clock,
                                     component=component)
-            total_remain = sum(
-                self.df.at[clock, f'{component.name} remain [W]'] for component in env.re_supply)
+                # Initialisiere Remains getrennt
+            pv_remain = sum(self.df.at[clock, f'{pv.name} remain [W]'] for pv in env.pv)
+            wt_remain = sum(self.df.at[clock, f'{wt.name} remain [W]'] for wt in env.wind_turbine)
+            total_remain = pv_remain + wt_remain
 
             self.df.at[clock, 'P_Remain_total [W]'] = total_remain
 
             # Priority 2: Charge Storage from RE
             for es in env.storage:
-                charge_power = self.re_charge (clock=clock, es=es,remain_power=total_remain)
-                total_remain -= charge_power
+
+                pv_remain, wt_remain = self.re_charge(clock, es, pv_power=pv_remain, wt_power=wt_remain)
 
             # Priority 3: Betrieb Electrolyser
             h2_produced = 0
             for el in env.electrolyser:
+                pv_remain, wt_remain = self.electrolyser_operate(clock=clock, el=el,pv_power= pv_remain,wt_power=wt_remain)
 
-                self.electrolyser_operate(clock=clock, el=el, power= total_remain)
-
-                h2_produced += el.df_electrolyser.at[clock, 'H2_Production [kg]']
+            h2_produced += el.df_electrolyser.at[clock, 'H2_Production [kg]']
 
             #Speicherung der produzierten Wasserstoffmenge im H2-Speicher
             for h2_storage in env.H2Storage:
@@ -171,10 +169,14 @@ class Operator:
             self.system_covered = False
         self.dispatch_finished = True
 
+        cols = []
+        for pv in self.env.pv:
+            cols.append(f'{pv.name}')
+
         self.export_core_data()
 
         #self.plot_daily_system_behavior(day='2022-06-01')
-        self.plot_daily_system_behavior_interactive(day='2022-07-01')
+        #self.plot_daily_system_behavior_interactive(day='2022-07-01')
 
 
     def check_dispatch(self):
@@ -269,7 +271,7 @@ class Operator:
         # discharge storage
         for es in env.storage:
             storage_power[es.name] = es.p_n
-            storage_capacity[es.name] = (es.df.at[clock, 'Q [Wh]'] - es.soc_min * es.c) * env.i_step / 60
+            storage_capacity[es.name] = (es.df.at[clock, 'Q [Wh]'] - es.soc_min * es.c) * t_step/ 60
 
         #power_sum = sum(storage_power.values())
         #capacity_sum = sum(storage_capacity.values())
@@ -337,6 +339,8 @@ class Operator:
             RE component
         :return: None
         """
+
+
         df = self.df
 
         df.at[clock, f'{component.name} [W]'] = np.where(
@@ -347,6 +351,7 @@ class Operator:
         df.at[clock, f'{component.name} remain [W]'] = np.where(
            component.df.at[clock, 'P [W]'] - df.at[clock, 'P_Res [W]'] < 0,
             0, component.df.at[clock, 'P [W]'] - df.at[clock, 'P_Res [W]'])
+
         df.at[clock, 'P_Res [W]'] -= df.at[clock, f'{component.name} [W]']
         if df.at[clock, 'P_Res [W]'] < 0:
             df.at[clock, 'P_Res [W]'] = 0
@@ -354,25 +359,70 @@ class Operator:
     def re_charge(self,
                   clock: dt.datetime,
                   es: Storage,
-                  remain_power):
+                  pv_power,
+                  wt_power):
         """
         :param clock:
         :param es:
         :param remain_power:
         :return:
         """
+        '''
         if clock == self.df.index[0]:
             es.df.at[clock, 'P [W]'] = 0
             es.df.at[clock, 'SOC'] = es.soc
             es.df.at[clock, 'Q [Wh]'] = es.soc * es.c
         # Charge storage
-        charge_power = es.charge(clock=clock, power=remain_power)
+        #charge_power = es.charge(clock=clock, power=remain_power)
+        if pv_power > es.p_n:
+            charge_power_pv =es.charge(clock=clock, power=es.p_n)
+            charge_power_wt=0
+            self.df.at[clock, f'{es.name}_from_PV_[W]'] = charge_power_pv
+        else:
+            charge_power_pv=es.charge(clock=clock, power=pv_power)
+            if wt_power>0:
+                charge_power_wt=es.p_n-charge_power_pv
+
+        if es.q_remain ==0:
+            if wt_power == 0:
+                charge_from_wt= 0
 
         self.df.at[clock, f'{es.name} [W]'] = charge_power
 
         self.df.at[clock, f'{es.name} soc'] = es.df.at[clock, 'SOC']
 
         return charge_power
+        '''
+
+        if clock == self.df.index[0]:
+            es.df.at[clock, 'P [W]'] = 0
+            es.df.at[clock, 'SOC'] = es.soc
+            es.df.at[clock, 'Q [Wh]'] = es.soc * es.c
+
+        t_step = self.env.i_step
+        max_power = es.p_n
+
+        # === Schritt 1: Ladeversuch aus PV ===
+        power_pv_input = min(pv_power, max_power)
+        power_used_pv = es.charge(clock=clock, power=power_pv_input)
+
+        pv_power -= power_used_pv
+        remaining_power = max_power - power_used_pv
+
+        # === Schritt 2: Wenn Speicher noch aufnahmefähig, Wind einspeisen ===
+        power_used_wt = 0
+        if remaining_power > 0 and wt_power > 0:
+            power_wt_input = min(wt_power, remaining_power)
+            power_used_wt = es.charge(clock=clock, power=power_wt_input)
+            wt_power -= power_used_wt
+
+        # === Tracking in DataFrame ===
+        self.df.at[clock, 'PV_to_storage [W]'] = power_used_pv
+        self.df.at[clock, 'WT_to_storage[W]'] = power_used_wt
+        self.df.at[clock, f'{es.name} [W]'] = power_used_pv + power_used_wt
+        self.df.at[clock, f'{es.name} soc'] = es.df.at[clock, 'SOC']
+
+        return pv_power, wt_power
 
 
     def grid_profile(self,
@@ -405,7 +455,7 @@ class Operator:
 
     def electrolyser_operate(self, clock: dt.datetime,
                              el: Electrolyser,
-                             power):
+                             pv_power, wt_power):
 
         """
         :param clock:
@@ -413,12 +463,29 @@ class Operator:
         :param power:
         :return:
         """
-        el.run(clock=clock, power=power)
+        power_needed = el.p_n
 
-        self.df.at[clock, f'{el.name} Input_Power [W]'] = power
+        # === 1. Zuerst PV nutzen ===
+        power_from_pv = min(pv_power, power_needed)
+        power_needed -= power_from_pv
+
+        # === 2. Dann Wind nutzen (falls nötig) ===
+        power_from_wt = min(wt_power, power_needed)
+        power_needed -= power_from_wt
+
+        # === 3. Gesamteingangsleistung setzen ===
+        total_power = power_from_pv + power_from_wt
+        el.run(clock=clock, power=total_power)
+
+        # === 4. Tracking im Operator-DataFrame ===
+        self.df.at[clock, 'from_PV_to_electrolyser [W]'] = power_from_pv
+        self.df.at[clock, 'from_WT_to_electrolyser [W]'] = power_from_wt
+        self.df.at[clock, f'{el.name}_Input_Power [W]'] = total_power
         self.df.at[clock, f'{el.name} [W]'] = el.df_electrolyser.at[clock, 'P[W]']
         self.df.at[clock, f'{el.name} [%]'] = el.df_electrolyser.at[clock, 'P[%]']
-        self.df.at[clock, f'{el.name} Hydrogen [kg]'] = el.df_electrolyser.at[clock, 'H2_Production [kg]']
+        self.df.at[clock, f'{el.name}_Hydrogen [kg]'] = el.df_electrolyser.at[clock, 'H2_Production [kg]']
+
+        return pv_power, wt_power
 
     def H2_charge(self, clock: dt.datetime, hstr: H2Storage, inflow: float, el= Electrolyser):
 
@@ -437,11 +504,9 @@ class Operator:
 
         hstr.charge(clock=clock, inflow=inflow, el=el)
 
-
         self.df.at[clock, f'{hstr.name} [W]'] = hstr.hstorage_df.at[clock, 'Q[Wh]']
         self.df.at[clock, f'{hstr.name} SOC[%]'] = hstr.hstorage_df.at[clock, 'SOC']
         self.df.at[clock, f'{hstr.name} level [kg]'] = hstr.hstorage_df.at[clock,'Storage Level [kg]']
-
 
         return
 
@@ -450,8 +515,10 @@ class Operator:
                       fc:FuelCell,
                       hstr: H2Storage,
                       power: float):
+
+        #t_step = self.env.i_step
         # [kg]  Berechnung der notwendigen Wasserstoffsmenge
-        required_Hydrogen = (power * 0.25) / (33330 * fc.efficiency)
+        required_Hydrogen = (power ) / (33.33*1000 * fc.efficiency)
 
         # verfügbare Wasserstoff abrufen
 
@@ -459,7 +526,7 @@ class Operator:
 
         #available_h2 = hstr.get_storage_level(hstr.current_level)
 
-        used_Hydrogen = min (required_Hydrogen, available_h2)
+        used_Hydrogen = min(required_Hydrogen, available_h2)
 
         power_generated, hydrogen_consumed = fc.fc_operate(clock=clock, hydrogen_used=used_Hydrogen)
 
@@ -487,15 +554,16 @@ class Operator:
         # Wichtige Spalten auswählen
         core_columns = [
             'Load [W]',
+            'P_Res [W]',
             'PV_Production [W]',
             'P_Remain_total [W]',
             'ES_1 [W]',
             'ES_1 soc',
             'Electrolyser_1 [W]',
             'Electrolyser_1 [%]',
-            'Electrolyser_1 Hydrogen [kg]',
+            'Electrolyser_1_Hydrogen [kg]',
             'H2_Storage level [kg]',
-            'FuelCell_2 [W]'
+            'FuelCell_1 [W]'
         ]
         core_columns_existing = [col for col in core_columns if col in self.df.columns]
         core_df = self.df[core_columns_existing].copy()
