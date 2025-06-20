@@ -306,7 +306,7 @@ class Evaluation:
         :param component: object
         :return: None
         """
-        if isinstance(component, Storage):
+        if isinstance(component, (Storage,FuelCell)):
             co2_init = (component.co2_init+ component.replacement_co2)/1000
         elif isinstance(component, Grid):
             co2_init = 0
@@ -364,7 +364,7 @@ class Evaluation:
         """
         if isinstance(component, Grid):
             investment_cost = 0
-        elif isinstance(component, Storage, FuelCell ):
+        elif isinstance(component, (Storage,FuelCell)):
             investment_cost = component.c_invest + component.replacement_cost
 
         else:

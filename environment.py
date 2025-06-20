@@ -596,7 +596,7 @@ class Environment:
                        c_invest: float = None,
                        c_op_main_n: float = None,
                        c_op_main: float = None,
-                       lifetime: float = 20
+                       lifetime: float =20
                        ):
         """
 
@@ -611,7 +611,7 @@ class Environment:
         :return:
         """
         if name is None:
-         name = f'H2_Storage_{len(self.H2Storage) + 1}'
+         name = f'H2_Storage {len(self.H2Storage) + 1}'
 
         # **Erstelle das H2Storage-Objekt mit den richtigen Variablen**
         self.H2Storage.append(H2Storage(env=self,
@@ -628,17 +628,14 @@ class Environment:
 
     def add_fuel_cell(self,
                      max_power: float = None,
-                     efficiency: float= 0.6,
                       c_invest_n: float = None,
                       c_invest: float = None,
                       c_op_main_n: float = None,
                       c_op_main: float = None,
-                      lifetime: float = 20
+                      lifetime:float = 10 #years
                      ) :
         """
-
         :param max_power:
-        :param efficiency:
         :param c_invest:
         :param c_op_main:
         :return:
@@ -646,19 +643,16 @@ class Environment:
         name = f'FuelCell_{len(self.fuel_cell) + 1}'
         fuel_cell = FuelCell(env=self,
                              max_power=max_power,
-                             efficiency=efficiency,
                              c_invest_n=c_invest_n,
                              c_invest=c_invest,
                              c_op_main_n=c_op_main_n,
-                             c_op_main=c_op_main
+                             c_op_main=c_op_main,
+                             lifetime= lifetime
                              )
 
         self.fuel_cell.append(fuel_cell)
-
         self.h2_components.append(fuel_cell)
-
         self.df[f'{name}: P [W]'] = fuel_cell.df_fc['Power Output [W]']
-
         self.df[f'{name}: H2 Consumption [kg]'] = fuel_cell.df_fc['H2 Consumed [kg]']
 
 

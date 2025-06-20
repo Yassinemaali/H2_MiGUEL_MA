@@ -35,20 +35,19 @@ class H2Storage:
         :param initial_level: Initial hydrogen level in the storage (kg).
         """
         self.env = env
-        self.soc_min = 0.1
+        self.soc_min = 0.01
         self.soc_max = 0.95
         self.name = name
         self.capacity = capacity  # Maximum storage capacity in kg
-        self.current_level = initial_level*capacity  # Current storage level in kg
+        if initial_level is not None:
+            self.current_level = initial_level * capacity
+        else:
+            self.current_level = 0.1 * capacity  # Default: 10% initial
         self.lifetime= lifetime
-
         # Emissionsdaten
         self.co2_init = co2_init * self.capacity  # kg CO₂
-
-
         # Kosten
-        # Investement cost [USD]
-        self.invest_cost =c_invest
+        self.invest_cost =c_invest   # Investement cost [USD]
         if c_invest is None:
            self.c_invest = c_invest_n * self.capacity
         else:
@@ -56,28 +55,19 @@ class H2Storage:
         #Operation Cost
         self.c_op_main = c_op_main     # USD /a
         self.c_op_main_n = c_op_main_n   #USD /KG ODER kw
-
         if c_op_main is None:
             self.c_op_main = self.c_op_main_n * self.capacity
         else:
             self.c_op_main = c_op_main
-
         #variable COST
         self.c_var_n = c_var_n
         self.c_var = self.c_var_n * self.capacity
-
-        # If initial_level is not given, start at 50% capacity
-        self.current_level = initial_level if initial_level is not None else 0.25 * self.capacity
-
-
         # DataFrame to track storage levels and flows over time
         self.hstorage_df = pd.DataFrame(columns=['H2 Inflow [kg]',
                                                 'H2 Outflow [kg]',
                                                 'Storage Level [kg]',
                                                  'SOC [%]',
                                                  'Q[Wh]'], index= self.env.time)
-        #self.set_initial_values()
-
         # Set initial values in dataframe
         initial_soc = self.current_level / self.capacity
         start_time = self.env.time[0]
@@ -89,10 +79,7 @@ class H2Storage:
             'Name': f'H2Storage_{id(self)}',  # Unique identifier for each instance
             'Capacity [kg]': self.capacity,
             'Initial Level [kg]': self.current_level,
-
         }
-
-
 
     def charge(self, clock: dt.datetime, inflow: float, el: Electrolyser):
         """
@@ -127,38 +114,41 @@ class H2Storage:
         self.hstorage_df.at[clock, 'SOC [%]'] = soc
         self.hstorage_df.at[clock, 'Q[Wh]'] += charge
         #self.storage_df.at[clock, 'H2 Production [kg]'] = el.df_electrolyser.at[clock, 'H2_Production [kg]']
-
-
         return
 
     def discharge(self, clock: dt.datetime, outflow: float):
         """
-        Discharge hydrogen from the storage.
+        Discharge hydrogen from the storage, respecting soc_min limit.
 
         :param clock: Current timestamp.
         :param outflow: Amount of hydrogen withdrawn from the storage (kg).
         """
         time_step = self.env.i_step / 60
+
         if outflow <= 0:
-            return   # Kein Entladevorgang, falls kein Outflow vorhanden
+            return  # Kein Entladevorgang nötig
 
-        new_level = self.current_level - outflow
+        min_level = self.soc_min * self.capacity  # Mindestfüllstand (kg)
+        max_outflow = self.current_level - min_level  # Maximal entnehmbare Menge
 
-        if new_level < 0:
-            outflow = self.current_level  # Anpassung, um Unterlauf zu verhindern
-            new_level = 0
+        if max_outflow <= 0:
+            # Speicher ist bereits auf oder unter soc_min → keine Entnahme möglich
+            return
 
-        self.current_level = new_level
+        # Falls outflow größer als erlaubt → Begrenzen
+        if outflow > max_outflow:
+            outflow = max_outflow
 
-        soc = (self.current_level / self.capacity)*100
+        # Neue aktuelle Füllmenge berechnen
+        self.current_level -= outflow
+
+        soc = (self.current_level / self.capacity) * 100
         discharge = 33.33 * outflow * 1000 * time_step
 
         # Logging ins DataFrame
         self.hstorage_df.at[clock, 'H2 Inflow [kg]'] = 0
         self.hstorage_df.at[clock, 'H2 Outflow [kg]'] = outflow
-        self.hstorage_df.at[clock, 'Storage Level [kg]'] = new_level
+        self.hstorage_df.at[clock, 'Storage Level [kg]'] = self.current_level
         self.hstorage_df.at[clock, 'SOC [%]'] = soc
         self.hstorage_df.at[clock, 'Q[Wh]'] -= discharge
-
-
         return

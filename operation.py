@@ -107,7 +107,8 @@ class Operator:
         processed_times = set()
 
         # Time step iteration
-        for clock in self.df.index:
+        for i,clock in enumerate(self.df.index):
+            prev_clock = self.df.index[i - 1] if i > 0 else clock
             # Priority 1: RE self supply
             for component in env.re_supply:
 
@@ -127,13 +128,28 @@ class Operator:
 
             # Priority 3: Betrieb Electrolyser
             h2_produced = 0
-            for el in env.electrolyser:
-                pv_remain, wt_remain = self.electrolyser_operate(clock=clock, el=el,pv_power= pv_remain,wt_power=wt_remain)
-
-            h2_produced += el.df_electrolyser.at[clock, 'H2_Production [kg]']
-
-            #Speicherung der produzierten Wasserstoffmenge im H2-Speicher
             for h2_storage in env.H2Storage:
+                # Prüfen, ob Speicher voll ist (SOC [%] vom vorherigen Zeitschritt)
+                h2_full=h2_storage.hstorage_df.at[prev_clock, 'SOC [%]'] >= 100
+
+                if h2_full:
+                    # Kein Betrieb, aber Werte im Elektrolyseur-DataFrame setzen
+                    for el in env.electrolyser:
+                        self.df.at[clock, f'{el.name} [W]'] = 0
+                        self.df.at[clock, f'{el.name} [%]'] = 0
+                        self.df.at[clock, f'{el.name}_Hydrogen [kg]'] = 0
+
+                else:
+                    # Nur wenn Speicher nicht voll ist → Elektrolyseur betreiben
+                    for el in env.electrolyser:
+                        pv_remain, wt_remain = self.electrolyser_operate(clock=clock,
+                                                                         el=el,pv_power= pv_remain,
+                                                                         wt_power=wt_remain)
+
+                        h2_produced += el.df_electrolyser.at[clock, 'H2_Production [kg]']
+
+                #Speicherung der produzierten Wasserstoffmenge im H2-Speicher
+                #for  h2_storage in env.H2Storage:
                 self.H2_charge(clock=clock, hstr=h2_storage, inflow=h2_produced, el=el)
 
             for fc in env.fuel_cell:
@@ -204,7 +220,8 @@ class Operator:
         Dispatch strategy from stable grid connection
             Stable grid connection:
                 3) Cover residual load from Storage
-                4) Cover residual load from Grid
+                4) Cover residual Load from Fuelcell
+                5) Cover residual load from Grid
         :param clock: dt.datetime
             time stamp
         :return: None
@@ -484,6 +501,7 @@ class Operator:
         self.df.at[clock, f'{el.name} [W]'] = el.df_electrolyser.at[clock, 'P[W]']
         self.df.at[clock, f'{el.name} [%]'] = el.df_electrolyser.at[clock, 'P[%]']
         self.df.at[clock, f'{el.name}_Hydrogen [kg]'] = el.df_electrolyser.at[clock, 'H2_Production [kg]']
+        self.df.at[clock, f'{el.name} Efficiency [%]']= el.df_electrolyser.at[clock, 'Efficiency'] *100
 
         return pv_power, wt_power
 
@@ -516,29 +534,46 @@ class Operator:
                       hstr: H2Storage,
                       power: float):
 
-        #t_step = self.env.i_step
-        # [kg]  Berechnung der notwendigen Wasserstoffsmenge
-        required_Hydrogen = (power ) / (33.33*1000 * fc.efficiency)
+        t_step = self.env.i_step/60
+        print(f"Timestep:{t_step}")
+        fc_power=min(power,fc.max_power )
+
+        # [kg] Berechnung der notwendigen Wasserstoffsmenge
+        fc_efficiency= fc.get_efficiency(p_rel=(fc_power/fc.max_power)*100)
+        print(f"die efficiency am re_fc_operate {fc_efficiency}")
+        required_Hydrogen = fc_power / (33.33*1000 * fc_efficiency)
 
         # verfügbare Wasserstoff abrufen
+        available_h2 = hstr.hstorage_df.at[clock, 'Storage Level [kg]']-(hstr.soc_min*hstr.capacity)
+        #used_Hydrogen = min(required_Hydrogen, available_h2)
 
-        available_h2 = hstr.hstorage_df.at[clock, 'Storage Level [kg]']
+        if required_Hydrogen < available_h2:
+            used_Hydrogen=required_Hydrogen
+        else:
+            # ITERATIV berechne reduzierte Leistung passend zu verfügbarem H₂
+            used_Hydrogen = available_h2
+            for _ in range(10):  # max 10 Iterationen
+                fc_power = (used_Hydrogen * 33.33 * 1000 * fc_efficiency)/t_step
+                p_rel = (fc_power / fc.max_power) * 100
+                eff_new = fc.get_efficiency(p_rel)
+                if abs(fc_efficiency - eff_new) < 1e-4:
+                    break
+                fc_efficiency = eff_new
+            else:
+                    print(f"[WARN] FC @ {clock}: Iteration nicht konvergiert. η ≈ {fc_efficiency:.4f}")
 
-        #available_h2 = hstr.get_storage_level(hstr.current_level)
 
-        used_Hydrogen = min(required_Hydrogen, available_h2)
 
-        power_generated, hydrogen_consumed = fc.fc_operate(clock=clock, hydrogen_used=used_Hydrogen)
-
+        power_generated, hydrogen_consumed = fc.fc_operate(clock=clock,
+                                                           hydrogen_used=used_Hydrogen,
+                                                           eff= fc_efficiency,
+                                                           power_output=fc_power)
           # Dataframe aktualisieren
-
         self.df.at[clock, f'{fc.name} [W]'] = power_generated   # Umrechnung in Watt
         self.df.at[clock, 'P_Res [W]'] -= power_generated
 
          # Aktualisieren des H2-Speichers nach Nutzung
-
         hstr.discharge(clock=clock, outflow=hydrogen_consumed)
-
         self.df.at[clock, f'{hstr.name} level [kg]'] = hstr.hstorage_df.at[clock, 'Storage Level [kg]']
         self.df.at[clock, 'H2-SOC [%]'] = hstr.hstorage_df.at[clock, 'SOC [%]']
 
@@ -561,8 +596,9 @@ class Operator:
             'ES_1 soc',
             'Electrolyser_1 [W]',
             'Electrolyser_1 [%]',
+            'Electrolyser_1 Efficiency[ %]',
             'Electrolyser_1_Hydrogen [kg]',
-            'H2_Storage level [kg]',
+            'H2_Storage 1 level [kg]',
             'FuelCell_1 [W]'
         ]
         core_columns_existing = [col for col in core_columns if col in self.df.columns]
