@@ -5,29 +5,11 @@ from pathlib import Path
 from environment import Environment
 from operation import Operator
 from evaluation import Evaluation
-from Reporting import Reporting
-from Sizing import Sizing
-import matplotlib.pyplot as plt
-import math
-from scipy.optimize import minimize
-
-from report.report import Report
-from multiprocessing import Pool, cpu_count
-from itertools import product
-import seaborn as sns
 import os
-print("Aktueller Arbeitsordner:", os.getcwd())
 
-
-def demonstration(grid_connection=False, n_modul=None,H2_stor= None, Bat_cap=None, el= None):
+def demonstration(grid_connection=False, n_modul=None):
     """
-    Create an Off grid system with the following system components
-        - PV: 60 kWp
-        - Electrolyser : 30 kW
-        - Hydrogen Storage : 500 KG
-        - Battery storage: 10 kW/30kWh
-        - Fuel Cell:30kW
-    :return: environment
+
     """
     if grid_connection:
         name = 'Grid connected system'
@@ -78,7 +60,7 @@ def demonstration(grid_connection=False, n_modul=None,H2_stor= None, Bat_cap=Non
     df = df.iloc[:8760]  # Kürzen auf 365 Tage
 
   
-    environment.add_load(load_profile="Caiambe-Data-CLEAN.csv")
+    environment.add_load(load_profile="Caiambe-Data-neu.csv")
 
     #Num_module = math.ceil(cap_pv / 100)
 
@@ -89,16 +71,16 @@ def demonstration(grid_connection=False, n_modul=None,H2_stor= None, Bat_cap=Non
 
     if not grid_connection:
         environment.add_storage(p_n=550_000,
-                                c=Bat_cap,
+                                c=85_0000,
                                 soc=0.25)
         # **Wasserstoffkomponenten hinzufügen**
         # elektrolyseur mit p_n Leistung [W]
-        environment.add_electrolyser(p_n=el,
+        environment.add_electrolyser(p_n=1350_000,
                                      c_op_main_n= 21.16,
                                      c_invest_n=2115.19,
                                      lifetime=20)
         # Wasserstoffspeicher, Kapazität [kg]
-        environment.add_H2_Storage(capacity=H2_stor,
+        environment.add_H2_Storage(capacity=500,
                                    initial_level=0.05,
                                    c_invest_n=610.10,
                                    c_op_main_n=0
@@ -111,51 +93,31 @@ def demonstration(grid_connection=False, n_modul=None,H2_stor= None, Bat_cap=Non
 
     return environment
 
-results_block2 = []
-PV=[25,35,45,30,40,50]
-#PV=[25,35,45]
-#El_leistung= [500_000,750_000,1_000_000]
-El_leistung= [500_000,750_000,1_000_000,1_500_000,2_000_000,3_000_000]
-H2_STOR = [1000,2000,3000,4000,5000,6000]
-#batterie= [3_000_000,4_000_000,5_000_000]
-batterie= [1_000_000,2_000_000,6_000_000]
 
-  # fix: 1.3 MW
-for n in PV:
-    for el in El_leistung:
-        for bat in batterie:
-            for h2 in H2_STOR :
-                env = demonstration(grid_connection=False, Bat_cap=bat, H2_stor=h2, el=el, n_modul=n)
-                operator = Operator(env=env)
-                evaluation = Evaluation(env=env, operator=operator)
 
-                lcoe = evaluation.evaluation_df.loc['System', 'LCOE [US$/kWh]']
-                co2 = evaluation.evaluation_df.loc['System', 'Lifetime CO2 emissions [t]']
-                H2_Anteil = (
-                    evaluation.evaluation_df.loc['FuelCell_1', 'Annual energy supply [kWh/a]']
-                    / evaluation.evaluation_df.loc['System', 'Annual energy supply [kWh/a]']
-                ) * 100
+env = demonstration(grid_connection=False, n_modul=35)
+operator = Operator(env=env)
+evaluation = Evaluation(env=env, operator=operator)
 
-                p_res = operator.df['P_Res [W]'].sum() / 1_000_000
-                total = operator.df['Load [W]'].sum() / 1_000_000
-                coverage = round((1 - p_res / total) * 100, 2)
+lcoe = evaluation.evaluation_df.loc['System', 'LCOE [US$/kWh]']
+co2 = evaluation.evaluation_df.loc['System', 'Lifetime CO2 emissions [t]']
+H2_Anteil = (
+    evaluation.evaluation_df.loc['FuelCell_1', 'Annual energy supply [kWh/a]']
+    / evaluation.evaluation_df.loc['System', 'Annual energy supply [kWh/a]']
+) * 100
 
-                results_block2.append({
-                    "Batterie [kWh]": bat / 1000,
-                    "H2 Storage [kg]":h2,
-                    "Coverage [%]": coverage,
-                    "Uncovered_Load [MWh]": round(p_res, 2),
-                    "H2-Anteil [%]": round(H2_Anteil, 2),
-                    "LCOE [US$/kWh]": round(lcoe, 2),
-                    "CO2_emissions [t]": round(co2, 2),
-                    "El_Power [kW]": el / 1000,
-                    "PV [kWp]": n*100
-                })
+p_res = operator.df['P_Res [W]'].sum() / 1_000_000
+total = operator.df['Load [W]'].sum() / 1_000_000
+coverage = round((1 - p_res / total) * 100, 2)
+print(
+    "LCOE:",lcoe,
+    "CO2 Emissionen:", co2,
+    "Wasserstoffnutzung:", H2_Anteil
 
-# ✅ Speichern
-df = pd.DataFrame(results_block2)
-filename = "sensitivitaet_komplett4.xlsx"
-df.to_excel(filename, index=False)
-print(f"✅ Ergebnisse gespeichert in: {filename}")
+)
+
+
+
+
 
 
